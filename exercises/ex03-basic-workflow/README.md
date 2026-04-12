@@ -21,7 +21,6 @@ python exercises/ex03-basic-workflow/incident_triage_workflow.py -i
 python exercises/ex03-basic-workflow/incident_triage_workflow.py -i -v
 ```
 
-
 ## Exercises
 1. Run the workflow with the provided sample incident (non-interactive).
 2. Run the workflow on an interactive way. First ask a random request (e.g. submit expenses) and then try again asking to create an incident.
@@ -41,7 +40,7 @@ python exercises/ex03-basic-workflow/incident_triage_workflow.py -i -v
 - Mixing `Executor` and `Agent` nodes gives you controlled + intelligent steps.
 - Each executor only knows about its neighbours — loose coupling by design.
 
-## Incident Example:
+## Prompt examples:
 - incident_id="INC-2026-00314"
 - system_id="SBX"
 - short_text="SBX: Dialog work processes exhausted after transport import",

@@ -39,7 +39,7 @@ python exercises/ex01-basic-agent/sap_health_agent.py --interactive --verbose
   tool with side effects.
 - Streaming (`stream=True`) allows you to display tokens progressively.
 
-## Example questions
+## Prompt examples
 
 Try these in `--interactive` mode to exercise all three tools:
 

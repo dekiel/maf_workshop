@@ -1,17 +1,17 @@
 """
-Exercise 01 — Basic Agent: SAP System Health Checker
+Exercise 01 — Basic Agent: System Health Checker
 
 This sample creates a minimal MAF agent that can answer questions about
-a mock SAP landscape. The agent is equipped with three tools:
+a mock company landscape. The agent is equipped with three tools:
 
-  - get_system_status()   — returns the health of a named SAP system
-  - list_open_incidents() — lists open SAP support incidents
+  - get_system_status()   — returns the health of a named system
+  - list_open_incidents() — lists open support incidents
   - create_support_message() — opens a support message (side effect, requires approval)
 
 Context
 -----------
-SAP X team routinely monitor multiple systems (DEV, QAS, PRD, SBX).
-Instead of logging into each SAP GUI, this agent surfaces status in natural
+The IT operations team routinely monitor multiple systems (DEV, QAS, PRD, SBX).
+Instead of logging into each system's GUI, this agent surfaces status in natural
 language and can draft support messages on request.
 
 References
@@ -29,10 +29,13 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from agent_framework import Agent, Message, tool
-from agent_framework.foundry import FoundryChatClient
-from azure.identity import AzureCliCredential
+from agent_framework.openai import OpenAIChatCompletionClient
 from dotenv import load_dotenv
 from pydantic import Field
+
+# Azure AI Foundry client (alternative)
+# from agent_framework.foundry import FoundryChatClient  
+# from azure.identity import AzureCliCredential  
 
 load_dotenv()
 
@@ -58,14 +61,14 @@ def _verbose_tool(fn):
 def get_system_status(
     system_id: Annotated[
         str,
-        Field(description="SAP system ID, e.g. PRD, QAS, DEV, SBX"),
+        Field(description="System ID, e.g. PRD, QAS, DEV, SBX"),
     ],
 ) -> dict:
     """
-    Return the current health status of a named SAP system.
+    Return the current health status of a named system.
     It uses simulated data.
     """
-    # In a real implementation this would call SMICM, SM50, or an RFC.
+
     systems = {
         "PRD": {"status": "GREEN", "cpu_pct": 42, "mem_pct": 67, "active_wp": 1205},
         "QAS": {"status": "YELLOW", "cpu_pct": 78, "mem_pct": 82, "active_wp": 340},
@@ -88,15 +91,15 @@ def get_system_status(
 def list_open_incidents(
     priority: Annotated[
         str,
-        Field(description="SAP priority: P1 (very high), P2 (high), P3 (medium), P4 (low)"),
+        Field(description="Priority: P1 (very high), P2 (high), P3 (medium), P4 (low)"),
     ] = "P1",
     system_id: Annotated[
         str | None,
-        Field(description="Filter by SAP system. Leave empty for all systems."),
+        Field(description="Filter by system. Leave empty for all systems."),
     ] = None,
 ) -> list[dict]:
     """
-    Return a list of open SAP support incidents filtered by priority.
+    Return a list of open support incidents filtered by priority.
     It uses simulated data.
     """
     all_incidents = [
@@ -129,7 +132,7 @@ def list_open_incidents(
             "priority": "P3",
             "system": "DEV",
             "category": "Basis",
-            "short_text": "DEV: Background job SAP_REORG_ABAPDUMPS missed scheduled start",
+            "short_text": "DEV: Background job REORG_ABAPDUMPS missed scheduled start",
             "created_at": "2026-04-02T16:30:00Z",
         },
     ]
@@ -143,15 +146,15 @@ def list_open_incidents(
 @tool(approval_mode="never_require")  # use "always_require" in production for side-effect tools
 @_verbose_tool
 def create_support_message(
-    system_id: Annotated[str, Field(description="Affected SAP system ID")],
+    system_id: Annotated[str, Field(description="Affected System ID")],
     priority: Annotated[str, Field(description="P1, P2, P3, or P4")],
     short_text: Annotated[str, Field(description="Brief description of the problem")]
 ) -> dict:
     """
-    Create a new SAP support message (incident) in the ticketing system.
+    Create a new support message (incident) in the ticketing system.
     This tool ALWAYS requires human approval because it has a production side effect.
     """
-    # In a real implementation this would call SAP NOTIF_CREATE or the support API.
+    # In a real implementation this would call the support API.
     ticket_id = f"INC-2026-{random.randint(400, 999):05d}"  # noqa: S311
     return {
         "ticket_id": ticket_id,
@@ -164,22 +167,28 @@ def create_support_message(
     }
 
 
-# Main - for non interactive session
-async def main() -> None:
-
-    ## We are using a FoundryChatClient in this sample, but you can swap in any client supported by MAF (e.g. OpenAIChatClient) with minimal code changes. The tools and agent logic remain the same regardless of the underlying LLM provider.
-    client = FoundryChatClient(
-        project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-        model=os.environ["FOUNDRY_MODEL"],
-        credential=AzureCliCredential(),
+def _create_agent() -> Agent:
+    """Create the Health Agent with the configured LLM client."""
+    ## GitHub Models client — set GITHUB_PAT and GITHUB_MODEL in your .env
+    
+    # Alternatively, use FoundryChatClient for Azure AI Foundry:
+    # client = FoundryChatClient(
+    #     project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
+    #     model=os.environ["FOUNDRY_MODEL"],
+    #     credential=AzureCliCredential(),
+    # )
+    
+    client = OpenAIChatCompletionClient(
+        model=os.environ.get("GITHUB_MODEL", "gpt-4o"),
+        api_key=os.environ["GITHUB_PAT"],
+        base_url="https://models.inference.ai.azure.com",
     )
-
-    agent = Agent(
+    return Agent(
         client=client,
-        name="SAPHealthAgent",
+        name="HealthAgent",
         instructions=(
-            "You are a knowledgeable SAP Basis assistant. "
-            "You help the team monitor SAP system health, review open incidents, "
+            "You are a knowledgeable Basis assistant. "
+            "You help the team monitor system health, review open incidents, "
             "and draft support messages. "
             "Always reference the system ID in your answers. "
             "Be concise and professional."
@@ -187,7 +196,12 @@ async def main() -> None:
         tools=[get_system_status, list_open_incidents, create_support_message],
     )
 
-    print("SAP System Health Agent \n")
+# Main - for non interactive session
+async def main() -> None:
+
+    agent = _create_agent()
+
+    print("System Health Agent \n")
 
     # --- Non-streaming: get the full answer at once ---
     question1 = "What is the current status of PRD and QAS systems?"
@@ -207,28 +221,9 @@ async def main() -> None:
 # Main - for interactive session
 async def interactive() -> None:
     """Interactive terminal loop — type your own questions."""
-    
-    ## We are using a FoundryChatClient in this sample, but you can swap in any client supported by MAF (e.g. OpenAIChatClient) with minimal code changes. The tools and agent logic remain the same regardless of the underlying LLM provider.
-    client = FoundryChatClient(
-        project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-        model=os.environ["FOUNDRY_MODEL"],
-        credential=AzureCliCredential(),
-    )
+    agent = _create_agent()
 
-    agent = Agent(
-        client=client,
-        name="SAPHealthAgent",
-        instructions=(
-            "You are a knowledgeable SAP Basis assistant. "
-            "You help the team monitor SAP system health, review open incidents, "
-            "and draft support messages. "
-            "Always reference the system ID in your answers. "
-            "Be concise and professional."
-        ),
-        tools=[get_system_status, list_open_incidents, create_support_message],
-    )
-
-    print("SAP System Health Agent — interactive mode")
+    print("System Health Agent — interactive mode")
     print("Type your question and press Enter. Type 'exit' or 'quit' to stop.\n")
 
     while True:
