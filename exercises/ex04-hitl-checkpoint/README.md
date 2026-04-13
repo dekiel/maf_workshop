@@ -2,17 +2,16 @@
 
 ## Goal
 Build a workflow that pauses execution at a **human approval gate**, saves its
-state as a **checkpoint**, and can be fully **resumed** after a restart —
+state as a **checkpoint**, and can be fully **resumed** after a restart,
 even if the approver is not available immediately.
 
 ## Why this matters for SAP
-SAP Change Management (CHARM, ChaRM, or ITSM) requires human sign-off on
-transports before they are imported into Production. This workflow models:
+Change Management activities require human sign-off on transports before they are imported into Production. This workflow models:
 
-1. **Change Request Preparer** — formats the transport details for review
-2. **AI Impact Analyser** — drafts a risk assessment using an agent
-3. **Human Approval Gate** — pauses; waits for the change manager to approve
-4. **Import Executor** — simulates import once approved
+1. **Change Request Preparer** - formats the transport details for review
+2. **AI Impact Analyser** - drafts a risk assessment using an agent
+3. **Human Approval Gate** - pauses; waits for the change manager to approve
+4. **Import Executor** - simulates import once approved
 
 ## Concepts covered
 - `ctx.request_info()` — emit a structured pause-and-respond request
@@ -34,30 +33,11 @@ The first run will:
 4. After you respond, continue or loop back for revision
 5. List available checkpoints and offer to resume from one
 
-## Expected output
-```
-=== SAP Change Request Approval Workflow ===
-
-Processing change request: CRQ-2026-00042
-Step 1 — Preparing change request details ...
-Step 2 — AI analysing risk ...
-
-=== Change Manager Approval Required ===
-Change Request : CRQ-2026-00042
-Transport      : DEVK912345  (PRD import)
-Risk Assessment: [AI-generated text]
-
-Type 'approve' to proceed or enter revision guidance (or 'exit'): approve
-
-Change request CRQ-2026-00042 APPROVED. Proceeding to import simulation.
-Workflow completed: Transport DEVK912345 import to PRD scheduled for next maintenance window.
-```
-
 ## Exercises
-1. Run and type `approve`. Observe the full approval path.
-2. Run again and type a rejection reason (e.g. "missing downtime notification").
+1. Run and type `exit`. Observe that a checkpoint has been created.
+2. Re-run, observe that the agent identifies thar there is a checkpoint in place, and gives the user the option to resume without re-assessing the risk. Type `0` and then `approve` the workflow.
+3. Run again and type a rejection reason (e.g. "missing downtime notification").
    Watch the agent revise the request.
-3. Exit mid-run (`exit`). Restart the script and resume from the checkpoint.
 4. Inspect the generated `.json` checkpoint files in `checkpoints/` to understand
    the persisted state format.
 

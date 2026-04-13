@@ -274,7 +274,6 @@ def create_workflow(crq: ChangeRequest, storage: FileCheckpointStorage) -> Workf
         .add_edge(gateway, risk_executor)   # revision loop
         .build()
     )
-
 # Interactive session helper
 def prompt_for_approval(requests: dict[str, ApprovalRequest]) -> dict[str, str]:
     responses: dict[str, str] = {}

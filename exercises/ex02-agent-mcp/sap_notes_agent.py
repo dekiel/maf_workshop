@@ -6,9 +6,9 @@ repositories, issues, and documentation directly from a conversational agent.
 No manual function wrappers are needed — the agent discovers tools from the
 MCP server dynamically.
 
-SAP context
+Context
 -----------
-SAP developers regularly search GitHub for:
+Developers regularly search GitHub for:
   - SAP open-source libraries (ABAP SDK, SAP Cloud SDK, CAP framework)
   - BTP-related issue trackers and pull requests
   - SAP sample code repositories for RISE migrations
@@ -19,7 +19,6 @@ Prerequisites
 -------------
 Set in .env:
     GITHUB_PAT — your GitHub Personal Access Token
-    OPENAI_API_KEY + OPENAI_MODEL   (or FOUNDRY_* equivalents)
 
 References
 ----------
@@ -30,12 +29,24 @@ References
 import asyncio
 import functools
 import json
+import logging
 import os
 from typing import Annotated
+from pathlib import Path
+import sys
 
-from agent_framework import Agent, Message, tool
-from agent_framework_foundry import FoundryChatClient
-from azure.identity import AzureCliCredential
+# Suppress noisy HTTP and framework logs — only show warnings and errors
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("mcp").setLevel(logging.WARNING)
+logging.getLogger("agent_framework").setLevel(logging.WARNING)
+logging.getLogger("exercises.shared.model_client").setLevel(logging.WARNING)
+
+# Add the project root to the path so we can import from samples.shared
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from exercises.shared.model_client import create_chat_client
+
+from agent_framework import Agent, MCPStreamableHTTPTool, Message, tool
 from dotenv import load_dotenv
 from pydantic import Field
 
@@ -43,7 +54,6 @@ load_dotenv()
 
 # Set to True via --verbose / -v at startup (see __main__)
 VERBOSE: bool = False
-
 
 def _verbose_tool(fn):
     """Wrap a tool function to print its call and return value when VERBOSE=True."""
@@ -58,10 +68,7 @@ def _verbose_tool(fn):
         return result
     return wrapper
 
-# ---------------------------------------------------------------------------
 # A local @tool that complements the MCP tools
-# ---------------------------------------------------------------------------
-
 SAP_KEYWORD_GLOSSARY = {
     "ABAP": "Advanced Business Application Programming — SAP's proprietary language",
     "BTP": "SAP Business Technology Platform — PaaS offering for extensions and integrations",
@@ -95,68 +102,54 @@ def _print_mcp_event(chunk) -> None:
 VERBOSE: bool = False
 # Main
 async def main() -> None:
-    # Load PAT for GitHub authentication
-    github_pat = os.getenv("GITHUB_PAT")
-    if not github_pat:
-        raise ValueError(
-            "GITHUB_PAT is not set. Create a token at https://github.com/settings/tokens "
-            "and add it to your .env file."
-        )
+    # Create the LLM client (reads GITHUB_PAT + GITHUB_MODEL from .env)
+    client=create_chat_client(os.environ["GITHUB_MODEL"])
 
-    auth_headers = {"Authorization": f"Bearer {github_pat}"}
-
-    ## We are using a FoundryChatClient in this sample, but you can swap in any client supported by MAF (e.g. OpenAIChatClient) with minimal code changes. The tools and agent logic remain the same regardless of the underlying LLM provider.
-    client = FoundryChatClient(
-        project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-        model=os.environ["FOUNDRY_MODEL"],
-        credential=AzureCliCredential(),
+    # MCPStreamableHTTPTool connects to the Microsoft Learn MCP server.
+    # This is a public Streamable-HTTP MCP endpoint — no auth required.
+    # The agent discovers its tools (search, fetch) automatically at runtime.
+    ms_learn_mcp = MCPStreamableHTTPTool(
+        name="MicrosoftLearn",
+        url="https://learn.microsoft.com/api/mcp",
+        approval_mode="never_require",  # workshop convenience
     )
 
-    # get_mcp_tool() registers the GitHub remote MCP server.
-    # The agent will discover its tools automatically at runtime.
-    github_mcp_tool = client.get_mcp_tool(
-        name="GitHub",
-        url="https://api.githubcopilot.com/mcp/",
-        headers=auth_headers,
-        approval_mode="never_require", # "never_require" is for workshop convenience.
-    )
-
-    # Use async with to ensure the MCP connection is properly closed
     async with Agent(
         client=client,
-        name="SAPNotesResearcher",
+        name="SAPDocsResearcher",
         instructions=(
-            "You are an SAP technology researcher. "
-            "You help SAP developers find open-source repositories, code examples, "
-            "and issues related to SAP technologies on GitHub. "
+            "You are an SAP-on-Azure documentation researcher. "
+            "You help SAP architects and developers find official Microsoft documentation "
+            "about running SAP workloads on Azure (RISE with SAP, S/4HANA, BTP integration, etc.). "
             "When asked about SAP acronyms, use the lookup_sap_term tool first. "
-            "Be precise: always state the repository name and URL in your answers. "
+            "For documentation searches, use the MicrosoftLearn MCP tools. "
+            "Be precise: always state the article title and URL in your answers. "
             "IMPORTANT: Only answer using information returned by your tools. "
-            "Do not use your general training knowledge, make up data, or perform any web search outside the provided tools. "
+            "Do not use your general training knowledge, make up data, or guess URLs. "
             "If none of your tools return relevant information, say you do not know."
         ),
-        # Mix MCP tools with a regular @tool in the same list
-        tools=[github_mcp_tool, lookup_sap_term],
+        tools=[ms_learn_mcp, lookup_sap_term],
     ) as agent:
-        print("=== SAP Notes Researcher (MCP + GitHub) ===\n")
+        print("=== SAP Documentation Researcher (MCP + Microsoft Learn) ===\n")
 
         # Query 1: Glossary lookup via local tool
-        q1 = "What does BTP stand for in the SAP context?"
+        q1 = "What does RISE stand for in the SAP context?"
         print(f"User: {q1}")
         r1 = await agent.run(q1)
         print(f"Agent: {r1.text}\n")
 
-        # Query 2: MCP — search GitHub for SAP repositories
+        # Query 2: MCP — search Microsoft Learn for SAP on Azure docs
         q2 = (
-            "Find the top GitHub repositories related to SAP ABAP or SAP BTP."
+            "Search for documentation about deploying SAP S/4HANA on Azure. "
+            "Give me the top 3 results with titles and URLs."
         )
         print(f"User: {q2}")
         r2 = await agent.run(q2)
         print(f"Agent: {r2.text}\n")
 
-        # Query 3: MCP — look for open issues
+        # Query 3: MCP — look for RISE with SAP content
         q3 = (
-            "Search open GitHub issues that mention 'SAP RISE' or 'RISE with SAP' "
+            "Find Microsoft Learn articles about 'RISE with SAP' on Azure."
         )
         print(f"User: {q3}")
         r3 = await agent.run(q3)
@@ -165,44 +158,31 @@ async def main() -> None:
 
 async def interactive() -> None:
     """Interactive terminal loop — type your own questions."""
-    github_pat = os.getenv("GITHUB_PAT")
-    if not github_pat:
-        raise ValueError(
-            "GITHUB_PAT is not set. Create a token at https://github.com/settings/tokens "
-            "and add it to your .env file."
-        )
+    client=create_chat_client(os.environ["GITHUB_MODEL"])
 
-    auth_headers = {"Authorization": f"Bearer {github_pat}"}
-
-    client = FoundryChatClient(
-        project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-        model=os.environ["FOUNDRY_MODEL"],
-        credential=AzureCliCredential(),
-    )
-
-    github_mcp_tool = client.get_mcp_tool(
-        name="GitHub",
-        url="https://api.githubcopilot.com/mcp/",
-        headers=auth_headers,
+    ms_learn_mcp = MCPStreamableHTTPTool(
+        name="MicrosoftLearn",
+        url="https://learn.microsoft.com/api/mcp",
         approval_mode="never_require",
     )
 
     async with Agent(
         client=client,
-        name="SAPNotesResearcher",
+        name="SAPDocsResearcher",
         instructions=(
-            "You are an SAP technology researcher. "
-            "You help SAP developers find open-source repositories, code examples, "
-            "and issues related to SAP technologies on GitHub. "
+            "You are an SAP-on-Azure documentation researcher. "
+            "You help SAP architects and developers find official Microsoft documentation "
+            "about running SAP workloads on Azure (RISE with SAP, S/4HANA, BTP integration, etc.). "
             "When asked about SAP acronyms, use the lookup_sap_term tool first. "
-            "Be precise: always state the repository name and URL in your answers. "
+            "For documentation searches, use the MicrosoftLearn MCP tools. "
+            "Be precise: always state the article title and URL in your answers. "
             "IMPORTANT: Only answer using information returned by your tools. "
-            "Do not use your general training knowledge, make up data, or perform any web search outside the provided tools. "
+            "Do not use your general training knowledge, make up data, or guess URLs. "
             "If none of your tools return relevant information, say you do not know."
         ),
-        tools=[github_mcp_tool, lookup_sap_term],
+        tools=[ms_learn_mcp, lookup_sap_term],
     ) as agent:
-        print("=== SAP Notes Researcher — interactive mode ===")
+        print("Documentation Researcher — interactive mode")
         print("Type your question and press Enter. Type 'exit' or 'quit' to stop.\n")
 
         while True:
