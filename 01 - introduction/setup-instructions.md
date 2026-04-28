@@ -20,13 +20,13 @@ Verify:
 az version
 ```
 
-### 3. Log in to Azure
+### 3. Log in to Azure (if Azure models are used, if not skip)
 
 ```bash
 az login
 ```
 
-### 4. Create an Azure AI Foundry project
+### 4. Create an Azure AI Foundry project (OPTION 1: if Azure models are used, if not skip)
 
 1. Go to [Azure AI Foundry](https://ai.azure.com)
 2. Create a new project (or use an existing one)
@@ -35,7 +35,14 @@ az login
 
 Format: `https://<resource>.services.ai.azure.com/api/projects/<project>`
 
-### 5. Create and activate a virtual environment
+
+### 5. Create a Github PAT Token (OPTION 2: if GitHub models are used)
+
+1. Go your GitHub account --> Settings --> Developer Settings
+2. Go to personal access tokens --> Tokens --> Generate new token
+
+
+### 6. Create and activate a virtual environment
 
 ```bash
 cd maf_workshop
@@ -48,13 +55,13 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 6. Install packages
+### 7. Install packages
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 7. Configure environment variables
+### 8. Configure environment variables
 
 ```bash
 cp .env.example .env
@@ -62,7 +69,7 @@ cp .env.example .env
 
 Open `.env` and replace the placeholder values with your real endpoint and model name.
 
-### 8. Run the setup verification
+### 9. Run the setup verification
 
 ```bash
 python exercises/ex00-setup/verify_setup.py

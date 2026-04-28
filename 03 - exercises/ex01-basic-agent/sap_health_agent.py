@@ -23,15 +23,18 @@ References
 import asyncio
 import functools
 import json
-import os
 import random
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from agent_framework import Agent, Message, tool
-from agent_framework.openai import OpenAIChatCompletionClient
 from dotenv import load_dotenv
 from pydantic import Field
+from shared.model_client import create_chat_client
 
 # Azure AI Foundry client (alternative)
 # from agent_framework.foundry import FoundryChatClient  
@@ -108,7 +111,7 @@ def list_open_incidents(
             "priority": "P1",
             "system": "SBX",
             "category": "System Down",
-            "short_text": "SBX: Dialog work processes exhausted after transport import",
+            "short_text": "SBX: Application server down after maintenance window",
             "created_at": "2026-04-05T07:22:00Z",
         },
         {
@@ -124,7 +127,7 @@ def list_open_incidents(
             "priority": "P2",
             "system": "PRD",
             "category": "Authorisation",
-            "short_text": "PRD: Users in role ZSD_SALES cannot post billing documents (SU53 dump)",
+            "short_text": "PRD: Users cannot access the order management module — permission error",
             "created_at": "2026-04-03T09:48:00Z",
         },
         {
@@ -132,7 +135,7 @@ def list_open_incidents(
             "priority": "P3",
             "system": "DEV",
             "category": "Basis",
-            "short_text": "DEV: Background job REORG_ABAPDUMPS missed scheduled start",
+            "short_text": "DEV: Scheduled cleanup job missed its start time",
             "created_at": "2026-04-02T16:30:00Z",
         },
     ]
@@ -143,7 +146,7 @@ def list_open_incidents(
     return results
 
 
-@tool(approval_mode="never_require")  # use "always_require" in production for side-effect tools
+@tool(approval_mode="always_require")  # use "always_require" in production for side-effect tools
 @_verbose_tool
 def create_support_message(
     system_id: Annotated[str, Field(description="Affected System ID")],
@@ -169,25 +172,12 @@ def create_support_message(
 
 def _create_agent() -> Agent:
     """Create the Health Agent with the configured LLM client."""
-    ## GitHub Models client — set GITHUB_PAT and GITHUB_MODEL in your .env
-    
-    # Alternatively, use FoundryChatClient for Azure AI Foundry:
-    # client = FoundryChatClient(
-    #     project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-    #     model=os.environ["FOUNDRY_MODEL"],
-    #     credential=AzureCliCredential(),
-    # )
-    
-    client = OpenAIChatCompletionClient(
-        model=os.environ.get("GITHUB_MODEL", "gpt-4o"),
-        api_key=os.environ["GITHUB_PAT"],
-        base_url="https://models.inference.ai.azure.com",
-    )
+    client = create_chat_client()
     return Agent(
         client=client,
         name="HealthAgent",
         instructions=(
-            "You are a knowledgeable Basis assistant. "
+            "You are a knowledgeable IT operations assistant. "
             "You help the team monitor system health, review open incidents, "
             "and draft support messages. "
             "Always reference the system ID in your answers. "
@@ -198,6 +188,11 @@ def _create_agent() -> Agent:
 
 # Main - for non interactive session
 async def main() -> None:
+
+    # --- tool_choice: force the agent to always call a specific tool ---
+    # "required"                                              → model MUST call at least one tool (any)
+    # {"mode": "required", "required_function_name": <name>}  → model MUST call this exact tool
+    # omit / "auto"                                      → model decides freely (default)
 
     agent = _create_agent()
 
@@ -213,10 +208,15 @@ async def main() -> None:
     question2 = "List all open P1 and P2 incidents across our landscape."
     print(f"[streaming]\nUser: {question2}")
     print("Agent (streaming): ", end="", flush=True)
-    async for chunk in agent.run(question2, stream=True):
+    async for chunk in agent.run(question2, stream=True, options={"tool_choice": "required"}):
         if chunk.text:
             print(chunk.text, end="", flush=True)
     print("\n")
+
+    question3 = "SBX health?"
+    print(f"[tool_choice=get_system_status]\nUser: {question3}")
+    result3 = await agent.run(question3, options={"tool_choice": {"mode": "required", "required_function_name": "list_open_incidents"}})
+    print(f"Agent: {result3.text}\n")
 
 # Main - for interactive session
 async def interactive() -> None:

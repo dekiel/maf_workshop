@@ -26,8 +26,11 @@ References
 import asyncio
 import functools
 import json
-import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent_framework import (
     Agent,
@@ -41,9 +44,8 @@ from agent_framework import (
     executor,
     handler,
 )
-from agent_framework.foundry import FoundryChatClient
-from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
+from shared.model_client import create_chat_client
 from typing_extensions import Never
 
 load_dotenv()
@@ -276,11 +278,7 @@ async def output_collector(
 def create_triage_workflow():
     # Step 0: Intent router
     router_agent = Agent(
-        client=FoundryChatClient(
-            project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-            model=os.environ["FOUNDRY_MODEL"],
-            credential=AzureCliCredential(),
-        ),
+        client=create_chat_client(),
         name="IncidentRouter",
         instructions=(
             "You are an intent classifier for an SAP Support Desk. "
@@ -296,11 +294,7 @@ def create_triage_workflow():
 
     # Step 3: LLM-powered resolution planner
     planner_agent = Agent(
-        client=FoundryChatClient(
-            project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-            model=os.environ["FOUNDRY_MODEL"],
-            credential=AzureCliCredential(),
-        ),
+        client=create_chat_client(),
         name="ResolutionPlanner",
         instructions="You are a senior SAP Basis consultant producing concise incident resolution plans.",
     )
@@ -376,11 +370,7 @@ async def interactive() -> None:
 
     # Check intent directly via the router agent, before asking for any details
     router_agent = Agent(
-        client=FoundryChatClient(
-            project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-            model=os.environ["FOUNDRY_MODEL"],
-            credential=AzureCliCredential(),
-        ),
+        client=create_chat_client(),
         name="IncidentRouter",
         instructions=(
             "You are an intent classifier for an SAP Support Desk. "

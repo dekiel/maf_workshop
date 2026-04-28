@@ -4,14 +4,15 @@ Exercise 00 — Setup Verification
 Run this script to confirm your environment is correctly configured before
 starting the workshop exercises.
 
-Usage:
-    python exercises/ex00-setup/verify_setup.py
 """
 
 import asyncio
 import importlib
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def check(label: str, passed: bool, detail: str = "") -> bool:
@@ -22,7 +23,6 @@ def check(label: str, passed: bool, detail: str = "") -> bool:
     print(line)
     return passed
 
-
 def check_python_version() -> bool:
     version = sys.version_info
     ok = version >= (3, 10)
@@ -32,14 +32,12 @@ def check_python_version() -> bool:
         f"{version.major}.{version.minor}.{version.micro}" + ("" if ok else " — need 3.10+"),
     )
 
-
 def check_package(package: str) -> bool:
     try:
         importlib.import_module(package)
         return check(f"Package '{package}' installed", True)
     except ImportError:
         return check(f"Package '{package}' installed", False, "run: pip install -r requirements.txt")
-
 
 def check_env_var(name: str, required: bool = True) -> bool:
     value = os.getenv(name)
@@ -50,11 +48,9 @@ def check_env_var(name: str, required: bool = True) -> bool:
     check(f"Env var {name}", True, "(optional — not set)")
     return True
 
-
 async def check_azure_credential() -> bool:
     try:
         from azure.identity import AzureCliCredential
-
         cred = AzureCliCredential()
         token = cred.get_token("https://management.azure.com/.default")
         return check("Azure CLI credential", bool(token.token))
@@ -72,14 +68,28 @@ async def check_foundry_endpoint() -> bool:
         )
     try:
         import urllib.request
-
-        # A lightweight connectivity probe — we just check DNS / TCP, not auth
         host = endpoint.split("/")[2]
         urllib.request.urlopen(f"https://{host}", timeout=5)  # noqa: S310
         return check("Foundry endpoint reachable", True, host)
     except Exception:
         # Endpoint may require auth — connectivity failure here is acceptable
         return check("Foundry endpoint reachable", True, "(auth required — assumed reachable)")
+
+
+async def check_live_llm() -> bool:
+    """Send a minimal request via create_chat_client() and check for a non-empty reply."""
+    try:
+        from agent_framework import Agent
+        from shared.model_client import create_chat_client
+
+        client = create_chat_client()
+        backend = type(client).__name__
+        agent = Agent(client=client, name="PingAgent", instructions="You are a ping agent.")
+        result = await agent.run("Reply with exactly: pong")
+        ok = bool(result.text and result.text.strip())
+        return check(f"Live LLM call ({backend})", ok, result.text.strip()[:60] if ok else "empty response")
+    except Exception as exc:
+        return check("Live LLM call", False, str(exc)[:120])
 
 
 async def main() -> None:
@@ -101,17 +111,34 @@ async def main() -> None:
     results.append(check_package("dotenv"))
 
     print()
-    results.append(check_env_var("FOUNDRY_PROJECT_ENDPOINT"))
-    results.append(check_env_var("FOUNDRY_MODEL"))
-    results.append(check_env_var("GITHUB_PAT", required=False))
+    foundry_endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "")
+    github_pat = os.getenv("GITHUB_PAT", "")
+    has_foundry = bool(foundry_endpoint and "your-project" not in foundry_endpoint)
+    has_github = bool(github_pat)
+
+    results.append(check_env_var("FOUNDRY_PROJECT_ENDPOINT", required=not has_github))
+    results.append(check_env_var("FOUNDRY_MODEL", required=has_foundry))
+    results.append(check_env_var("GITHUB_PAT", required=not has_foundry))
+    results.append(check_env_var("GITHUB_MODEL", required=has_github and not has_foundry))
+
+    if not has_foundry and not has_github:
+        print("\n❌ At least one backend must be configured (FOUNDRY_PROJECT_ENDPOINT or GITHUB_PAT).")
+        sys.exit(1)
 
     print()
-    results.append(await check_azure_credential())
-    results.append(await check_foundry_endpoint())
+    if has_foundry:
+        results.append(await check_azure_credential())
+        results.append(await check_foundry_endpoint())
+    else:
+        check("Azure CLI credential", True, "(skipped — using GitHub Models)")
+        check("Foundry endpoint reachable", True, "(skipped — using GitHub Models)")
+
+    print()
+    results.append(await check_live_llm())
 
     print()
     if all(results):
-        print("🎉 All checks passed — you are ready to start!")
+        print("All checks passed — you are ready to start!")
     else:
         failed = sum(1 for r in results if not r)
         print(f"⚠️  {failed} check(s) failed. Fix the issues above before continuing.")

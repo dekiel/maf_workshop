@@ -13,7 +13,7 @@
 | **Audience** | SAP developers with Python basics |
 | **Level** | Intermediate |
 | **Runtime** | Python 3.10+ |
-| **AI backend** | Azure AI Foundry (gpt-4o recommended) |
+| **AI backend** | Azure AI Foundry **or** GitHub Models (gpt-4o recommended) |
 
 ### What you will build
 
@@ -24,15 +24,13 @@
 | [ex02-agent-mcp](exercises/ex02-agent-mcp/) | Agent with MCP tools | Query SAP documentation via GitHub MCP |
 | [ex03-basic-workflow](exercises/ex03-basic-workflow/) | Basic workflow | SAP incident triage pipeline |
 | [ex04-hitl-checkpoint](exercises/ex04-hitl-checkpoint/) | Human-in-the-loop + checkpoints | SAP change request approval workflow |
-| [ex05-complex-scenario](exercises/ex05-complex-scenario/) | Agent + workflow combined | End-to-end RISE with SAP assessment |
 
 ### Learning outcomes
 - Understand the MAF core primitives: `Agent`, `tool`, `WorkflowBuilder`, `Executor`
 - Connect agents to external tools and MCP servers
 - Build sequential and parallel multi-agent workflows
 - Implement human approval gates with checkpoint/resume
-- Design a full end-to-end scenario matching real SAP operations
-
+- Design a full end-to-end scenario matching real customer scenarios
 ---
 
 ## Prerequisites
@@ -47,9 +45,15 @@
 | Git | any | Clone samples |
 
 ### Required accounts / access
-- **Azure subscription** with an Azure AI Foundry project provisioned ([quickstart](https://learn.microsoft.com/azure/ai-foundry/))
-- A **model deployment** (e.g., `gpt-4o`) in that project
-- *(Exercise 02 only)* A GitHub Personal Access Token ([create one](https://github.com/settings/tokens))
+At least **one** of the following:
+
+**Option A — Azure AI Foundry** (required for Exercise 02)
+- Azure subscription with an Azure AI Foundry project provisioned ([quickstart](https://learn.microsoft.com/azure/ai-foundry/))
+- A model deployment (e.g., `gpt-4o`) in that project
+- `az login` completed
+
+**Option B — GitHub Models** (all exercises except 02)
+- A GitHub Personal Access Token ([create one](https://github.com/settings/tokens)) — scopes: `read:user`
 
 ### Python knowledge assumed
 - Functions, classes, `async/await`
@@ -86,13 +90,19 @@ cp .env.example .env
 # Then open .env and fill in your values
 ```
 
-Minimum required variables for most exercises:
+**Option A — Azure AI Foundry:**
 ```
-FOUNDRY_PROJECT_ENDPOINT=https://<your-project>.services.ai.azure.com/api/projects/<your-project>
+FOUNDRY_PROJECT_ENDPOINT=https://<resource>.services.ai.azure.com/api/projects/<project>
 FOUNDRY_MODEL=gpt-4o
 ```
 
-### 5 — Authenticate with Azure
+**Option B — GitHub Models:**
+```
+GITHUB_PAT=github_pat_...
+GITHUB_MODEL=gpt-4o
+```
+
+### 5 — Authenticate with Azure *(Foundry only — skip for GitHub Models)*
 ```bash
 az login
 ```
@@ -101,13 +111,7 @@ az login
 ```bash
 python exercises/ex00-setup/verify_setup.py
 ```
-Expected output:
-```
-✅ Python version OK: 3.xx
-✅ agent_framework package found
-✅ Azure CLI credential OK
-✅ Foundry endpoint reachable
-All checks passed — you are ready to start!
+Expected output (Foundry):
 ```
 
 ---
@@ -115,83 +119,46 @@ All checks passed — you are ready to start!
 ## Exercise Guide
 
 ### Ex00 — Setup Validation
-**Goal:** Confirm that all tools and credentials are working.  
-**File:** [exercises/ex00-setup/verify_setup.py](exercises/ex00-setup/verify_setup.py)  
-```bash
-python exercises/ex00-setup/verify_setup.py
-```
+**Goal:** Confirm tools, credentials and LLM connectivity before starting.  
+**Concepts:** `create_chat_client()`, Azure AI Foundry auth, GitHub Models auth, env var priority order
 
 ---
 
 ### Ex01 — Basic Agent: SAP System Health Checker
-**Goal:** Create your first MAF agent with a `@tool` function.  
-**File:** [exercises/ex01-basic-agent/sap_health_agent.py](exercises/ex01-basic-agent/sap_health_agent.py)
-
-```bash
-python exercises/ex01-basic-agent/sap_health_agent.py
-```
-
-**Concepts:** `Agent`, `FoundryChatClient`, `@tool`, streamed responses  
-**Verification:** The agent responds to questions like *"What is the status of PRD?"* using a mock SAP landscape tool.
+**Goal:** Build an agent that answers SAP Basis questions by calling Python tools — check system status, list incidents, create a support message.  
+**Concepts:** `Agent`, `@tool`, `create_chat_client()`, streaming responses, `approval_mode`
 
 ---
 
 ### Ex02 — Agent with MCP: SAP Notes Researcher
-**Goal:** Connect to a remote MCP server (GitHub) and extend the agent with live tool discovery.  
-**File:** [exercises/ex02-agent-mcp/sap_notes_agent.py](exercises/ex02-agent-mcp/sap_notes_agent.py)
+**Goal:** Extend an agent with a remote MCP server so it can search GitHub repositories and issues without any custom API wrappers.  
+**Concepts:** `client.get_mcp_tool()`, MCP transports, `async with Agent(...)`, mixing local `@tool` and remote MCP tools
 
-Additional setup — set in `.env`:
-```
-GITHUB_PAT=<your-github-pat>
-OPENAI_API_KEY=<your-openai-key>     # or use FOUNDRY env vars
-OPENAI_MODEL=gpt-4o
-```
-
-```bash
-python exercises/ex02-agent-mcp/sap_notes_agent.py
-```
-
-**Concepts:** `client.get_mcp_tool()`, remote MCP server, `async with Agent(...)`, dynamic tool registration  
-**Verification:** Agent queries GitHub repositories and issues related to SAP-themed topics.
+> Requires Foundry — `get_mcp_tool()` is not available on the GitHub Models backend.
 
 ---
 
 ### Ex03 — Basic Workflow: SAP Incident Triage Pipeline
-**Goal:** Chain multiple processing steps into a deterministic workflow.  
-**File:** [exercises/ex03-basic-workflow/incident_triage_workflow.py](exercises/ex03-basic-workflow/incident_triage_workflow.py)
-
-```bash
-python exercises/ex03-basic-workflow/incident_triage_workflow.py
-```
-
-**Concepts:** `WorkflowBuilder`, `Executor`, `@executor`, `@handler`, edges, `ctx.send_message()`, `ctx.yield_output()`  
-**Verification:** A sample SAP incident is classified, enriched, and a response draft is produced.
+**Goal:** Chain multiple deterministic steps into a workflow that classifies, enriches and drafts a resolution plan for an SAP incident.  
+**Concepts:** `WorkflowBuilder`, `Executor`, `@executor`, `@handler`, `ctx.send_message()`, `ctx.yield_output()`
 
 ---
 
 ### Ex04 — HITL + Checkpoints: SAP Change Request Approval
-**Goal:** Build a workflow that pauses for human approval and can be checkpointed and resumed.  
-**File:** [exercises/ex04-hitl-checkpoint/change_request_workflow.py](exercises/ex04-hitl-checkpoint/change_request_workflow.py)
-
-```bash
-python exercises/ex04-hitl-checkpoint/change_request_workflow.py
-```
-
-**Concepts:** `ctx.request_info()`, `@response_handler`, `FileCheckpointStorage`, `on_checkpoint_save/restore`, resume from checkpoint  
-**Verification:** The workflow pauses, prompts for approval, and the approved change request is processed through to completion. After approval, you will see a checkpoint resume prompt.
+**Goal:** Build a workflow that pauses at a human approval gate, persists its state to disk, and resumes after a restart.  
+**Concepts:** `ctx.request_info()`, `@response_handler`, `FileCheckpointStorage`, checkpoint save/restore, workflow resume
 
 ---
 
 ### Ex05 — Complex Scenario: RISE with SAP Readiness Assessment
-**Goal:** Combine a multi-agent orchestration workflow with an integrated sub-workflow, MCP-powered research, and a human sign-off gate.  
-**File:** [exercises/ex05-complex-scenario/rise_assessment_workflow.py](exercises/ex05-complex-scenario/rise_assessment_workflow.py)
+**Goal:** Combine multiple agents, shared workflow state, a human sign-off gate and file output into a production-grade end-to-end assessment pipeline.  
+**Concepts:** `AgentExecutor`, multi-agent pipeline, `ctx.set_state` / `ctx.get_state`, HITL checkpoint, output to file
 
-```bash
-python exercises/ex05-complex-scenario/rise_assessment_workflow.py
-```
+---
 
-**Concepts:** Multi-agent handoff, `WorkflowBuilder` composition, `AgentExecutor`, state management, human approval, output aggregation  
-**Verification:** The assessment workflow produces a RISE readiness report, pauses for human sign-off, and saves the result to `output/assessment_report.md`.
+### Ex06 — Dev UI: SAP Triage with Browser Interface
+**Goal:** Register agents and a workflow in the MAF Developer UI to interact with them visually in the browser and inspect traces.  
+**Concepts:** `serve(entities=[...])`, DevUI form auto-generation from dataclasses, OpenTelemetry traces, parallel workflow branches
 
 ---
 
@@ -219,15 +186,17 @@ maf_workshop/
 │   ├── ex04-hitl-checkpoint/
 │   │   ├── README.md
 │   │   └── change_request_workflow.py
-│   └── ex05-complex-scenario/
-│       ├── README.md
-│       └── rise_assessment_workflow.py
-└── solutions/
-    ├── ex01_solution.py
-    ├── ex02_solution.py
-    ├── ex03_solution.py
-    ├── ex04_solution.py
-    └── ex05_solution.py
+│   ├── ex05-complex-scenario/
+│   │   ├── README.md
+│   │   └── rise_assessment_workflow.py
+│   ├── ex06-devui/
+│   │   ├── README.md
+│   │   ├── sap_triage_devui.py
+│   │   └── checkpoints/
+│   └── shared/
+│       ├── __init__.py
+│       └── model_client.py
+
 ```
 
 ---
@@ -235,9 +204,10 @@ maf_workshop/
 ## How to reset / clean up
 
 ```bash
-# Remove checkpoint files created by ex04 and ex05
+# Remove checkpoint files created by ex04, ex05 and ex06
 rm -rf exercises/ex04-hitl-checkpoint/checkpoints/
 rm -rf exercises/ex05-complex-scenario/checkpoints/
+rm -rf exercises/ex06-devui/checkpoints/
 rm -rf output/
 
 # Deactivate virtual environment
@@ -252,7 +222,8 @@ deactivate
 |---|---|---|
 | `ModuleNotFoundError: agent_framework` | Package not installed | Run `pip install -r requirements.txt` |
 | `DefaultAzureCredential failed` | Not logged in | Run `az login` |
-| `FOUNDRY_PROJECT_ENDPOINT not set` | Missing `.env` | Copy `.env.example` → `.env` and fill values |
+| `FOUNDRY_PROJECT_ENDPOINT not set` | Missing `.env` | Copy `.env.example` → `.env` and fill values (or use `GITHUB_PAT` instead) |
+| `get_mcp_tool` not found | Using GitHub Models for ex02 | Ex02 requires Foundry — set `FOUNDRY_PROJECT_ENDPOINT` |
 | `HTTP 401 from Foundry` | Wrong endpoint or model name | Check your Azure AI Foundry project URL |
 | `GITHUB_PAT not set` (ex02) | Missing token | Create token at github.com/settings/tokens |
 | `FileCheckpointStorage` path error | Directory missing | The code creates it; ensure you have write permission |
@@ -269,4 +240,3 @@ deactivate
 
 ---
 
-*Workshop content created for the SAP developer technical community — April 2026.*

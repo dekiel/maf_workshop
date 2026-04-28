@@ -26,12 +26,13 @@ References
 import asyncio
 import functools
 import json
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent_framework import (
     Agent,
@@ -47,8 +48,8 @@ from agent_framework import (
     handler,
     response_handler,
 )
-from agent_framework.openai import OpenAIChatCompletionClient
 from dotenv import load_dotenv
+from shared.model_client import create_chat_client
 
 if sys.version_info >= (3, 12):
     from typing import override
@@ -62,13 +63,9 @@ VERBOSE: bool = False
 
 
 def _create_agent(name: str, instructions: str, tools: list | None = None) -> Agent:
-    """Create an Agent with the GitHub Models client. Set GITHUB_PAT and GITHUB_MODEL in .env."""
+    """Create an Agent with the configured LLM client."""
     return Agent(
-        client=OpenAIChatCompletionClient(
-            model=os.environ.get("GITHUB_MODEL", "gpt-4o"),
-            api_key=os.environ["GITHUB_PAT"],
-            base_url="https://models.inference.ai.azure.com",
-        ),
+        client=create_chat_client(),
         name=name,
         instructions=instructions,
         tools=tools or [],
@@ -130,11 +127,11 @@ class ChangeRequestPreparer(Executor):
         ctx: WorkflowContext[AgentExecutorRequest],
     ) -> None:
         print(f"\n  Step 1 — Formatting the change request for the AI ...")
-        print(f"          (Transport {crq.transport_id}: {crq.source_system} → {crq.target_system})")
+        print(f"          (Transport {crq.transport_id}: {crq.source_system} -> {crq.target_system})")
         _verbose("ChangeRequest", {
             "crq_id": crq.crq_id,
             "transport": crq.transport_id,
-            "path": f"{crq.source_system} → {crq.target_system}",
+            "path": f"{crq.source_system} -> {crq.target_system}",
             "objects": crq.objects_changed,
         })
 
@@ -145,7 +142,7 @@ class ChangeRequestPreparer(Executor):
             f"Produce a concise risk assessment (max 150 words) for this transport:\n\n"
             f"Change Request  : {crq.crq_id}\n"
             f"Transport       : {crq.transport_id}\n"
-            f"Path            : {crq.source_system} → {crq.target_system}\n"
+            f"Path            : {crq.source_system} -> {crq.target_system}\n"
             f"Developer       : {crq.developer}\n"
             f"Description     : {crq.description}\n\n"
             f"Objects changed:\n{objects_list}\n\n"
@@ -163,7 +160,6 @@ class ChangeRequestPreparer(Executor):
                 should_respond=True,
             )
         )
-
 
 # Step 3 — ApprovalGateway (HITL + checkpoint)
 class ApprovalGateway(Executor):
@@ -186,9 +182,9 @@ class ApprovalGateway(Executor):
         self._iteration += 1
         crq: ChangeRequest = ctx.get_state("crq")
 
-        print(f"\n  Step 3 — 💾 Saving checkpoint to disk (workflow state is now persisted)")
-        print(f"          ⏸  Pausing for human approval — this is the HITL moment.")
-        print(f"          The workflow will wait here until a person responds.")
+        print(f"\n  Step 3: Saving checkpoint to disk (workflow state is now persisted)")
+        print(f"Pausing for human approval - this is the HITL moment.")
+        print(f"The workflow will wait here until a person responds.")
 
         await ctx.request_info(
             request_data=ApprovalRequest(
@@ -214,7 +210,7 @@ class ApprovalGateway(Executor):
     ) -> None:
         reply = feedback.strip()
         if not reply or reply.lower() == "approve":
-            print(f"\n  ✅ Change request {original_request.crq_id} APPROVED.")
+            print(f"\n Change request {original_request.crq_id} APPROVED.")
             import_message = (
                 f"Transport {original_request.transport_id} import to "
                 f"{original_request.target_system} scheduled for next maintenance window."
@@ -223,7 +219,7 @@ class ApprovalGateway(Executor):
             return
 
         # Revision requested — loop back to the risk analyser
-        print(f"\n  🔄 Revision requested: {reply}")
+        print(f"\n Revision requested: {reply}")
         crq: ChangeRequest = ctx.get_state("crq")
         revision_prompt = (
             f"Revise the risk assessment based on the change manager's feedback.\n\n"
@@ -282,7 +278,7 @@ def prompt_for_approval(requests: dict[str, ApprovalRequest]) -> dict[str, str]:
         print("=== SAP Change Management — Approval Required ===")
         print("=" * 60)
         print(f"Change Request : {req.crq_id}")
-        print(f"Transport      : {req.transport_id}  →  {req.target_system}")
+        print(f"Transport      : {req.transport_id}  ->  {req.target_system}")
         print(f"Iteration      : {req.iteration}")
         print(f"\n{req.prompt}")
         print(f"\nRisk Assessment:\n---\n{req.risk_assessment}\n---")
@@ -323,7 +319,6 @@ async def run_workflow(
     checkpoint_id: str | None = None,
 ) -> str:
     """Run (or resume) the workflow, handling HITL requests interactively.
-
     Follows the pattern from the official docs:
     https://learn.microsoft.com/en-us/agent-framework/workflows/human-in-the-loop
     """
@@ -367,7 +362,14 @@ async def main() -> None:
     CHECKPOINT_DIR.mkdir(exist_ok=True)
 
     sample_crq = _SAMPLE_CRQ
-    storage = FileCheckpointStorage(storage_path=CHECKPOINT_DIR)
+    storage = FileCheckpointStorage(
+        storage_path=CHECKPOINT_DIR,
+        allowed_checkpoint_types={
+            f"{ChangeRequest.__module__}:{ChangeRequest.__qualname__}",
+            f"{ReviewPackage.__module__}:{ReviewPackage.__qualname__}",
+            f"{ApprovalRequest.__module__}:{ApprovalRequest.__qualname__}",
+        },
+    )
     workflow = create_workflow(sample_crq, storage)
 
     # If a checkpoint exists from a previous run, offer to resume it
@@ -401,7 +403,7 @@ async def main() -> None:
     print("  3. Type 'exit' to simulate going offline or closing the terminal.")
     print("  4. Run the script again — it will find the checkpoint and offer to resume.")
     print()
-    print(f"Transport {sample_crq.transport_id}: {sample_crq.source_system} → {sample_crq.target_system}")
+    print(f"Transport {sample_crq.transport_id}: {sample_crq.source_system} -> {sample_crq.target_system}")
     print()
 
     result = await run_workflow(workflow, crq=sample_crq)
@@ -418,7 +420,7 @@ async def interactive() -> None:
     print("Press Enter to keep the default value shown in brackets.\n")
 
     _d = _SAMPLE_CRQ
-    print("A transport is a packaged set of code or config changes moved between SAP systems (DEV → QAS → PRD).\n")
+    print("A transport is a packaged set of code or config changes moved between SAP systems (DEV -> QAS -> PRD).\n")
     transport   = input(f"Transport ID (e.g. DEVK912345 or QASK900012) [{_d.transport_id}]: ").strip() or _d.transport_id
     target      = input(f"Target system — where to import it (DEV / QAS / PRD) [{_d.target_system}]: ").strip() or _d.target_system
     description = input(f"What does this change do? [{_d.description[:60]}...]: ").strip() or _d.description
@@ -439,7 +441,7 @@ async def interactive() -> None:
     workflow = create_workflow(crq, storage)
 
     print(f"Change Request : {crq.crq_id}")
-    print(f"Transport      : {crq.transport_id}  ({crq.source_system} → {crq.target_system})\n")
+    print(f"Transport      : {crq.transport_id}  ({crq.source_system} -> {crq.target_system})\n")
 
     result = await run_workflow(workflow, crq=crq)
     print(f"\nWorkflow completed: {result}")

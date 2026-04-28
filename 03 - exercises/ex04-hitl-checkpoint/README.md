@@ -24,6 +24,7 @@ Change Management activities require human sign-off on transports before they ar
 ## Run
 ```bash
 python exercises/ex04-hitl-checkpoint/change_request_workflow.py
+python exercises/ex04-hitl-checkpoint/change_request_workflow.py -i
 ```
 
 The first run will:
